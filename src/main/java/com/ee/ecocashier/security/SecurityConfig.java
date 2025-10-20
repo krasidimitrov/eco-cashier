@@ -23,7 +23,7 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)// disable CSRF for simplicity
                 .authorizeHttpRequests(auth -> auth
-                .anyRequest().authenticated())
+                .anyRequest().permitAll())
                 .addFilterBefore(apiKeyFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
