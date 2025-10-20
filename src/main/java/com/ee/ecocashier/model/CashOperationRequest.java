@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
 import java.util.Map;
 
+@ValidDenominations
 public record CashOperationRequest (
         @NotBlank String cashierId,
 
