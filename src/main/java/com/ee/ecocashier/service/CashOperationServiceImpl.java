@@ -61,6 +61,37 @@ public class CashOperationServiceImpl implements CashOperationService {
 
     private void withdraw(CashOperationRequest request) {
         try {
+            // Load balances including denominations
+            Map<String, CashBalance> balances = loadBalancesFromFile();
+
+            String key = request.cashierId() + "_" + request.currency();
+            CashBalance balance = balances.get(key);
+
+            if (balance == null) {
+                throw new IllegalArgumentException("No balance found for cashier " + request.cashierId() + " and currency " + request.currency());
+            }
+
+            if (balance.total().compareTo(request.amount()) < 0) {
+                throw new IllegalArgumentException("Insufficient cash for withdrawal");
+            }
+
+            //Check if requested denominations are available and subtract them
+            for (Map.Entry<Integer, Integer> entry : request.denominations().entrySet()) {
+                int currentQty = balance.denominations().getOrDefault(entry.getKey(), 0);
+                if (currentQty < entry.getValue()) {
+                    throw new IllegalArgumentException("Not enough denomination " + entry.getKey());
+                }
+                balance.denominations().put(entry.getKey(), currentQty - entry.getValue());
+            }
+
+            BigDecimal newTotal = balance.denominations().entrySet().stream()
+                    .map(e -> BigDecimal.valueOf(e.getKey()).multiply(BigDecimal.valueOf(e.getValue())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            balances.put(key, new CashBalance(balance.currency(), newTotal, balance.denominations()));
+
+            saveBalancesToFile(balances);
+
             storeTransaction(request.cashierId(), request.operationType().name(), request.currency().name(), request.amount(), request.denominations());
         } catch (IOException e) {
             throw new RuntimeException(e);
