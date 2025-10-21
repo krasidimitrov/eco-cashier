@@ -131,7 +131,7 @@ public class CashOperationServiceImpl implements CashOperationService {
     private Map<String, CashBalance> loadBalancesFromFile() {
         Map<String, CashBalance> balances = new HashMap<>();
 
-        Path filePath = Paths.get("balances_" + LocalDate.now(ZoneOffset.UTC) + ".csv");
+        Path filePath = Paths.get("balances.csv");
 
         if (Files.exists(filePath)) {
             try {
@@ -166,7 +166,7 @@ public class CashOperationServiceImpl implements CashOperationService {
 
     private void saveBalancesToFile(Map<String, CashBalance> balances) {
         try {
-            Path filePath = Paths.get("balances_" + LocalDate.now(ZoneOffset.UTC) + ".csv");
+            Path filePath = Paths.get("balances.csv");
 
             StringBuilder sb = new StringBuilder();
             sb.append("cashier,currency,balance,denominations").append(System.lineSeparator());
