@@ -45,7 +45,6 @@ public class DenominationValidator implements ConstraintValidator<ValidDenominat
 
             sum += entry.getKey() * entry.getValue();
         }
-        System.out.println("HERE");
         if (request.amount().compareTo(BigDecimal.valueOf(sum)) != 0) {
             context.disableDefaultConstraintViolation();
             context.buildConstraintViolationWithTemplate("Total value of denominations is " + sum + ", but the operation amount is " + request.amount())
