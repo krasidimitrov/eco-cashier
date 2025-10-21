@@ -1,5 +1,6 @@
 package com.ee.ecocashier.service;
 
+import com.ee.ecocashier.model.CashBalance;
 import com.ee.ecocashier.model.CashOperationRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -10,10 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,22 +34,23 @@ public class CashOperationServiceImpl implements CashOperationService {
 
     private void deposit(CashOperationRequest request) {
         try {
-            Map<String, BigDecimal> balances = loadBalancesFromFile();
+            Map<String, CashBalance> balances = loadBalancesFromFile();
 
             String key = request.cashierId() + "_" + request.currency();
-            BigDecimal current = balances.getOrDefault(key, BigDecimal.ZERO);
+            CashBalance balance = balances.getOrDefault(
+                    key,
+                    new CashBalance(request.currency().name(), BigDecimal.ZERO, new HashMap<>())
+            );
 
-            BigDecimal newBalance = switch (request.operationType()) {
-                case DEPOSIT -> current.add(request.amount());
-                case WITHDRAW -> {
-                    if (current.compareTo(request.amount()) < 0) {
-                        throw new IllegalArgumentException("Insufficient funds for withdrawal");
-                    }
-                    yield current.subtract(request.amount());
-                }
-            };
+            //handling denominations
+            for (Map.Entry<Integer, Integer> entry : request.denominations().entrySet()) {
+                balance.denominations().merge(entry.getKey(), entry.getValue(), Integer::sum);
+            }
+            BigDecimal newTotal = balance.denominations().entrySet().stream()
+                    .map(e -> BigDecimal.valueOf(e.getKey()).multiply(BigDecimal.valueOf(e.getValue())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            balances.put(key, newBalance);
+            balances.put(key, new CashBalance(balance.currency(), newTotal, balance.denominations()));
 
             saveBalancesToFile(balances);
             storeTransaction(request.cashierId(), request.operationType().name(), request.currency().name(), request.amount(), request.denominations());
@@ -75,10 +75,10 @@ public class CashOperationServiceImpl implements CashOperationService {
 
 
     private void storeTransaction(String cashierId,
-                                 String operationType,
-                                 String currency,
-                                 BigDecimal amount,
-                                 Map<Integer, Integer> denominations) throws IOException {
+                                  String operationType,
+                                  String currency,
+                                  BigDecimal amount,
+                                  Map<Integer, Integer> denominations) throws IOException {
 
         //Initializing the transaction history file if it does not exist
         initCsvFile();
@@ -97,8 +97,8 @@ public class CashOperationServiceImpl implements CashOperationService {
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND);
     }
 
-    private Map<String, BigDecimal> loadBalancesFromFile() {
-        Map<String, BigDecimal> balances = new HashMap<>();
+    private Map<String, CashBalance> loadBalancesFromFile() {
+        Map<String, CashBalance> balances = new HashMap<>();
 
         Path filePath = Paths.get("balances_" + LocalDate.now(ZoneOffset.UTC) + ".csv");
 
@@ -107,13 +107,25 @@ public class CashOperationServiceImpl implements CashOperationService {
                 List<String> lines = Files.readAllLines(filePath);
                 for (String line : lines) {
                     if (line.startsWith("cashier")) continue;
-                    String[] parts = line.split(",");
-                    if (parts.length != 3) continue;
-                    String key = parts[0] + "_" + parts[1];
-                    BigDecimal balance = new BigDecimal(parts[2]);
-                    balances.put(key, balance);
+                    String[] parts = line.split(",", 4);
+                    if (parts.length != 4) continue;
+
+                    String cashier = parts[0];
+                    String currency = parts[1];
+                    BigDecimal total = new BigDecimal(parts[2]);
+
+                    //parse denominations
+                    Map<Integer, Integer> denomMap = new HashMap<>();
+                    for (String entry : parts[3].split(";")) {
+                        if (entry.isEmpty()) continue;
+                        String[] kv = entry.split("=");
+                        denomMap.put(Integer.parseInt(kv[0]), Integer.parseInt(kv[1]));
+                    }
+
+                    String key = cashier + "_" + currency;
+                    balances.put(key, new CashBalance(currency, total, denomMap));
                 }
-            } catch (IOException e) {
+            } catch (IOException | NumberFormatException e) {
                 throw new RuntimeException("Failed to read balances file", e);
             }
         }
@@ -121,18 +133,26 @@ public class CashOperationServiceImpl implements CashOperationService {
         return balances;
     }
 
-    private void saveBalancesToFile(Map<String, BigDecimal> balances) {
+    private void saveBalancesToFile(Map<String, CashBalance> balances) {
         try {
             Path filePath = Paths.get("balances_" + LocalDate.now(ZoneOffset.UTC) + ".csv");
 
             StringBuilder sb = new StringBuilder();
-            sb.append("cashier,currency,balance").append(System.lineSeparator());
+            sb.append("cashier,currency,balance,denominations").append(System.lineSeparator());
 
-            for (Map.Entry<String, BigDecimal> entry : balances.entrySet()) {
-                String[] parts = entry.getKey().split("_");
-                sb.append(parts[0]).append(",")
-                        .append(parts[1]).append(",")
-                        .append(entry.getValue())
+            for (Map.Entry<String, CashBalance> entry : balances.entrySet()) {
+                String[] keyParts = entry.getKey().split("_");
+                String cashier = keyParts[0];
+                CashBalance cb = entry.getValue();
+
+                String denomStr = cb.denominations().entrySet().stream()
+                        .map(e -> e.getKey() + "=" + e.getValue())
+                        .collect(Collectors.joining(";"));
+
+                sb.append(cashier).append(",")
+                        .append(cb.currency()).append(",")
+                        .append(cb.total()).append(",")
+                        .append(denomStr)
                         .append(System.lineSeparator());
             }
 
